@@ -138,19 +138,22 @@ const isFetchingManga = ref(false);
 
 const CACHE_KEY = 'manga_chapters_cache_v3';
 const AUTH_KEY = 'manga_reader_auth_token';
+// New cache keys for tracking progress
+const LAST_URL_KEY = 'manga_last_selected_url';
+const LAST_TITLE_KEY = 'manga_last_selected_title';
 
 onMounted(async () => {
   const savedToken = localStorage.getItem(AUTH_KEY);
   if (savedToken) {
-    // Optimistically set authenticating true, then fetch data
     isAuthenticated.value = true;
     await initializeReader();
   }
 });
 
-// Helper to clear local state if unauthorized
 function handleAuthFailure() {
   localStorage.removeItem(AUTH_KEY);
+  localStorage.removeItem(LAST_URL_KEY); // Clean up tracking on logout/auth failure
+  localStorage.removeItem(LAST_TITLE_KEY);
   isAuthenticated.value = false;
   dataLoaded.value = false;
   mangaContent.value = [];
@@ -164,15 +167,34 @@ async function initializeReader() {
       if (parsed && parsed.length > 0) {
         chapterListRaw.value = parsed;
         isLoadingList.value = false;
+
+        // Restore progress from local storage if it exists
+        restoreLastSession();
+
         await fetchLiveUpdates();
         return;
       }
     }
     await fetchLiveUpdates();
+    // Try to restore session if live updates brought in a new list
+    restoreLastSession();
   } catch (err) {
     console.error("Failed to load chapters", err);
   } finally {
     isLoadingList.value = false;
+  }
+}
+
+// Helper to look up and restore the cached chapter
+function restoreLastSession() {
+  const savedUrl = localStorage.getItem(LAST_URL_KEY);
+  const savedTitle = localStorage.getItem(LAST_TITLE_KEY);
+
+  if (savedUrl) {
+    selectedUrl.value = savedUrl;
+    if (savedTitle) {
+      searchQuery.value = savedTitle;
+    }
   }
 }
 
@@ -195,7 +217,6 @@ async function handleUnlock() {
       isAuthenticated.value = true;
       await initializeReader();
     } else {
-      // Prioritize the specific statusMessage sent from our new backend logic
       authError.value = data.statusMessage || data.message || 'Incorrect password.';
     }
   } catch (err) {
@@ -212,7 +233,6 @@ async function fetchLiveUpdates() {
       headers: { 'Authorization': `Bearer ${token}` }
     });
 
-    // 🛡️ Guard: Kick out user if server invalidates token on load
     if (response.status === 401 || response.status === 403) {
       handleAuthFailure();
       return;
@@ -229,7 +249,6 @@ async function fetchLiveUpdates() {
   }
 }
 
-// 1. Map list into normalized numeric values
 const baseChapterList = computed(() => {
   let list = [];
   if (chapterListRaw.value && chapterListRaw.value.length > 0) {
@@ -252,7 +271,6 @@ const baseChapterList = computed(() => {
   });
 });
 
-// 2. Strict mapping search match filter
 const filteredChapters = computed(() => {
   const query = searchQuery.value.trim();
   if (!query) return baseChapterList.value;
@@ -274,16 +292,29 @@ function selectChapter(chapter) {
 }
 
 watch(selectedUrl, (newUrl) => {
-  if (newUrl && !isFetchingManga.value) {
-    if (mangaContent.value.length === 0 || !mangaContent.value.some(item => item.url === newUrl)) {
-      loadManga(newUrl, false);
+  if (newUrl) {
+    // 💾 Save current chapter selection to local storage
+    localStorage.setItem(LAST_URL_KEY, newUrl);
+
+    // Attempt to sync search input display with selection
+    const matchingChapter = baseChapterList.value.find(c => c.url === newUrl);
+    if (matchingChapter) {
+      searchQuery.value = matchingChapter.title;
+      localStorage.setItem(LAST_TITLE_KEY, matchingChapter.title);
+    }
+
+    if (!isFetchingManga.value) {
+      if (mangaContent.value.length === 0 || !mangaContent.value.some(item => item.url === newUrl)) {
+        loadManga(newUrl, false);
+      }
     }
   }
 });
 
 function loadNextBatch() {
   if (nextUrl.value) {
-    loadManga(nextUrl.value, false);
+    // Dynamically update selectedUrl so the watch block handles saving it too
+    selectedUrl.value = nextUrl.value;
   }
 }
 
@@ -297,7 +328,6 @@ async function loadManga(urlToFetch, appendContent = false) {
       headers: { 'Authorization': `Bearer ${token}` }
     });
 
-    // 🛡️ Guard: Kick out user if backend rejects the token during reading
     if (response.status === 401 || response.status === 403) {
       handleAuthFailure();
       return;
