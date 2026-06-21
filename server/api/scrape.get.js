@@ -1,7 +1,24 @@
 import axios from 'axios';
 import * as cheerio from 'cheerio';
+import jwt from 'jsonwebtoken';
 
 const BASE_URL = 'https://mangazin.org';
+
+function verifyAuth(event) {
+    const authHeader = getHeader(event, 'authorization');
+    const token = authHeader && authHeader.split(' ')[1];
+    const config = useRuntimeConfig();
+    const JWT_SECRET = config.jwtSecret || process.env.JWT_SECRET;
+
+    if (!token) {
+        throw createError({ statusCode: 401, statusMessage: 'Unauthorized access' });
+    }
+    try {
+        return jwt.verify(token, JWT_SECRET);
+    } catch (err) {
+        throw createError({ statusCode: 403, statusMessage: 'Invalid or expired session token' });
+    }
+}
 
 const getMajorChapter = (url) => {
     if (!url) return null;
@@ -18,6 +35,9 @@ const getNextUrl = ($, currentUrl) => {
 };
 
 export default defineEventHandler(async (event) => {
+    // 🛡️ BLOCK UNAUTHORIZED SCRAPING REQUESTS HERE
+    verifyAuth(event);
+
     const query = getQuery(event);
     let nextUrlToFollow = query.url;
 
@@ -71,6 +91,6 @@ export default defineEventHandler(async (event) => {
 
         return { content, nextUrl: nextUrlToFollow };
     } catch (error) {
-        throw createError({ statusCode: 500, statusMessage: error.message });
+        throw createError({ statusCode: error.statusCode || 500, statusMessage: error.message });
     }
 });

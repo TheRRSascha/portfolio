@@ -1,96 +1,128 @@
 <template>
   <div class="reader-container">
 
-    <div v-if="!dataLoaded" class="setup-screen">
-      <h2 class="title">Tales of Demons and Gods</h2>
+    <!-- 1. LOCK SCREEN (Shown if not authenticated) -->
+    <div v-if="!isAuthenticated" class="lock-screen">
+      <div class="lock-card">
+        <h2 class="title">Authorized Access Only</h2>
+        <p class="lock-subtitle">Please enter the password to unlock the reader.</p>
 
-      <div v-if="isLoadingList" class="loading-wrapper">
-        <div class="spinner"></div>
-        <p class="loading-text">Fetching chapter list...</p>
-      </div>
-
-      <div v-else class="search-wrapper">
-        <div class="input-relative">
+        <form @submit.prevent="handleUnlock" class="lock-form">
           <input
-              type="text"
-              v-model="searchQuery"
+              type="password"
+              v-model="passwordInput"
+              placeholder="Enter Password..."
               class="search-input"
-              placeholder="Type chapter number (e.g. 127)..."
-              @focus="isDropdownOpen = true"
-              :disabled="isFetchingManga"
+              :disabled="isAuthenticating"
           />
-          <button
-              @click="isDropdownOpen = !isDropdownOpen"
-              class="dropdown-arrow-btn"
-              type="button"
-              :disabled="isFetchingManga"
-          >
-            ▼
+          <button type="submit" class="next-chapter-btn unlock-btn" :disabled="isAuthenticating">
+            <span v-if="isAuthenticating">Verifying...</span>
+            <span v-else>Unlock Reader</span>
           </button>
+        </form>
+        <p v-if="authError" class="auth-error">{{ authError }}</p>
+      </div>
+    </div>
+
+    <!-- 2. MAIN CONTENT SCREEN (Only rendered if authenticated) -->
+    <template v-else>
+      <div v-if="!dataLoaded" class="setup-screen">
+        <h2 class="title">Tales of Demons and Gods</h2>
+
+        <div v-if="isLoadingList" class="loading-wrapper">
+          <div class="spinner"></div>
+          <p class="loading-text">Fetching chapter list...</p>
         </div>
 
-        <ul v-if="isDropdownOpen && filteredChapters.length > 0" class="results-list">
-          <li
-              v-for="chapter in filteredChapters"
-              :key="chapter.url"
-              @click="selectChapter(chapter)"
-              class="result-item"
+        <div v-else class="search-wrapper">
+          <div class="input-relative">
+            <input
+                type="text"
+                v-model="searchQuery"
+                class="search-input"
+                placeholder="Type chapter number (e.g. 127)..."
+                @focus="isDropdownOpen = true"
+                :disabled="isFetchingManga"
+            />
+            <button
+                @click="isDropdownOpen = !isDropdownOpen"
+                class="dropdown-arrow-btn"
+                type="button"
+                :disabled="isFetchingManga"
+            >
+              ▼
+            </button>
+          </div>
+
+          <ul v-if="isDropdownOpen && filteredChapters.length > 0" class="results-list">
+            <li
+                v-for="chapter in filteredChapters"
+                :key="chapter.url"
+                @click="selectChapter(chapter)"
+                class="result-item"
+            >
+              {{ chapter.title }}
+            </li>
+          </ul>
+          <ul v-else-if="isDropdownOpen && searchQuery" class="results-list">
+            <li class="result-item no-results">No matching chapters found</li>
+          </ul>
+
+          <div v-if="isFetchingManga" class="loading-wrapper inline-loader">
+            <div class="spinner small"></div>
+            <p class="loading-text">Downloading pages...</p>
+          </div>
+        </div>
+      </div>
+
+      <div v-else class="content-screen">
+        <div class="sticky-header">
+          <select v-model="selectedUrl" class="mini-dropdown">
+            <option v-for="chapter in baseChapterList" :key="chapter.url" :value="chapter.url">
+              {{ chapter.title }}
+            </option>
+          </select>
+        </div>
+
+        <div v-for="(item, index) in mangaContent" :key="index" class="manga-item">
+          <div v-if="item.type === 'divider'" class="separator">
+            {{ item.text }}
+          </div>
+          <img
+              v-else
+              :src="item.src"
+              class="manga-img"
+              loading="lazy"
+              alt="manga page"
+          />
+        </div>
+
+        <div class="nav-container">
+          <button
+              v-if="nextUrl"
+              class="next-chapter-btn"
+              :disabled="isFetchingManga"
+              @click="loadNextBatch"
           >
-            {{ chapter.title }}
-          </li>
-        </ul>
-        <ul v-else-if="isDropdownOpen && searchQuery" class="results-list">
-          <li class="result-item no-results">No matching chapters found</li>
-        </ul>
-
-        <div v-if="isFetchingManga" class="loading-wrapper inline-loader">
-          <div class="spinner small"></div>
-          <p class="loading-text">Downloading pages...</p>
+            <span v-if="isFetchingManga">Loading Next Chapter...</span>
+            <span v-else>Next Chapter ➔</span>
+          </button>
+          <p v-else class="end-text">🎉 Latest Chapter Reached!</p>
         </div>
       </div>
-    </div>
-
-    <div v-else class="content-screen">
-      <div class="sticky-header">
-        <select v-model="selectedUrl" class="mini-dropdown">
-          <option v-for="chapter in baseChapterList" :key="chapter.url" :value="chapter.url">
-            {{ chapter.title }}
-          </option>
-        </select>
-      </div>
-
-      <div v-for="(item, index) in mangaContent" :key="index" class="manga-item">
-        <div v-if="item.type === 'divider'" class="separator">
-          {{ item.text }}
-        </div>
-        <img
-            v-else
-            :src="item.src"
-            class="manga-img"
-            loading="lazy"
-            alt="manga page"
-        />
-      </div>
-
-      <div class="nav-container">
-        <button
-            v-if="nextUrl"
-            class="next-chapter-btn"
-            :disabled="isFetchingManga"
-            @click="loadNextBatch"
-        >
-          <span v-if="isFetchingManga">Loading Next Chapter...</span>
-          <span v-else>Next Chapter ➔</span>
-        </button>
-        <p v-else class="end-text">🎉 Latest Chapter Reached!</p>
-      </div>
-    </div>
+    </template>
 
   </div>
 </template>
 
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue';
+
+// Auth States
+const isAuthenticated = ref(false);
+const passwordInput = ref('');
+const isAuthenticating = ref(false);
+const authError = ref('');
 
 // Reactive Navigation and Content States
 const chapterListRaw = ref([]);
@@ -105,8 +137,26 @@ const isLoadingList = ref(true);
 const isFetchingManga = ref(false);
 
 const CACHE_KEY = 'manga_chapters_cache_v3';
+const AUTH_KEY = 'manga_reader_auth_token';
 
 onMounted(async () => {
+  const savedToken = localStorage.getItem(AUTH_KEY);
+  if (savedToken) {
+    // Optimistically set authenticating true, then fetch data
+    isAuthenticated.value = true;
+    await initializeReader();
+  }
+});
+
+// Helper to clear local state if unauthorized
+function handleAuthFailure() {
+  localStorage.removeItem(AUTH_KEY);
+  isAuthenticated.value = false;
+  dataLoaded.value = false;
+  mangaContent.value = [];
+}
+
+async function initializeReader() {
   try {
     const cachedData = localStorage.getItem(CACHE_KEY);
     if (cachedData) {
@@ -114,7 +164,7 @@ onMounted(async () => {
       if (parsed && parsed.length > 0) {
         chapterListRaw.value = parsed;
         isLoadingList.value = false;
-        fetchLiveUpdates();
+        await fetchLiveUpdates();
         return;
       }
     }
@@ -124,11 +174,50 @@ onMounted(async () => {
   } finally {
     isLoadingList.value = false;
   }
-});
+}
+
+async function handleUnlock() {
+  if (!passwordInput.value.trim()) return;
+  isAuthenticating.value = true;
+  authError.value = '';
+
+  try {
+    const response = await fetch('/api/auth', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: passwordInput.value })
+    });
+
+    const data = await response.json();
+
+    if (response.ok && data.success) {
+      localStorage.setItem(AUTH_KEY, data.token);
+      isAuthenticated.value = true;
+      await initializeReader();
+    } else {
+      // Prioritize the specific statusMessage sent from our new backend logic
+      authError.value = data.statusMessage || data.message || 'Incorrect password.';
+    }
+  } catch (err) {
+    authError.value = 'Server authentication error.';
+  } finally {
+    isAuthenticating.value = false;
+  }
+}
 
 async function fetchLiveUpdates() {
   try {
-    const response = await fetch('/api/chapters');
+    const token = localStorage.getItem(AUTH_KEY);
+    const response = await fetch('/api/chapters', {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+
+    // 🛡️ Guard: Kick out user if server invalidates token on load
+    if (response.status === 401 || response.status === 403) {
+      handleAuthFailure();
+      return;
+    }
+
     const data = await response.json();
 
     if (data && data.chapters && data.chapters.length > 0) {
@@ -194,7 +283,6 @@ watch(selectedUrl, (newUrl) => {
 
 function loadNextBatch() {
   if (nextUrl.value) {
-    // Crucial Change: Setting this to false now replaces images instead of appending them
     loadManga(nextUrl.value, false);
   }
 }
@@ -204,15 +292,23 @@ async function loadManga(urlToFetch, appendContent = false) {
   isFetchingManga.value = true;
 
   try {
-    const response = await fetch(`/api/scrape?url=${encodeURIComponent(urlToFetch)}`);
+    const token = localStorage.getItem(AUTH_KEY);
+    const response = await fetch(`/api/scrape?url=${encodeURIComponent(urlToFetch)}`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+
+    // 🛡️ Guard: Kick out user if backend rejects the token during reading
+    if (response.status === 401 || response.status === 403) {
+      handleAuthFailure();
+      return;
+    }
+
     const data = await response.json();
 
     if (appendContent) {
       mangaContent.value = [...mangaContent.value, ...data.content];
     } else {
-      // Replaces current data arrays with the fresh chapter content
       mangaContent.value = data.content;
-      // Instantly forces focus context back to the top of the browser view viewport
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
 
@@ -281,7 +377,8 @@ html, body {
 
 .search-input {
   width: 100%;
-  padding: 16px 50px 16px 16px;
+  box-sizing: border-box; /* THIS FIXES THE OVERFLOW */
+  padding: 16px; /* Simplified padding since this doesn't need the dropdown arrow space */
   background: #1a1a1a;
   color: #fff;
   border: 2px solid #2a2a2a;
@@ -440,6 +537,48 @@ html, body {
 .end-text {
   font-size: 16px;
   color: #666;
+  font-weight: 600;
+}
+
+/* Lock Screen Styles */
+.lock-screen {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+  padding: 20px;
+}
+.lock-card {
+  background: #111;
+  border: 1px solid #222;
+  padding: 40px 30px;
+  border-radius: 16px;
+  max-width: 400px;
+  width: 100%;
+  text-align: center;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.7);
+}
+.lock-subtitle {
+  color: #aaa;
+  font-size: 14px;
+  margin-top: -30px;
+  margin-bottom: 30px;
+}
+.lock-form {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+.unlock-btn {
+  padding: 14px !important;
+  font-size: 16px !important;
+  border-radius: 12px !important;
+}
+.auth-error {
+  color: #ff3b30;
+  font-size: 14px;
+  margin-top: 15px;
   font-weight: 600;
 }
 </style>
